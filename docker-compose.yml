@@ -4,6 +4,7 @@ services:
   rustfs:
     image: rustfs/rustfs:${RUSTFS_IMAGE_TAG:-latest}
     hostname: rustfs
+    container_name: rustfs
     init: true
     restart: unless-stopped
     security_opt:
