@@ -1,0 +1,32 @@
+name: rustfs
+
+services:
+  rustfs:
+    image: rustfs/rustfs:${RUSTFS_IMAGE_TAG:-latest}
+    hostname: rustfs
+    init: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:?RUSTFS_ACCESS_KEY must be set in .env}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:?RUSTFS_SECRET_KEY must be set in .env}
+    volumes:
+      - type: bind
+        source: ${RUSTFS_DATA_DIR:?RUSTFS_DATA_DIR must be set in .env}
+        target: /data
+      - type: bind
+        source: ${RUSTFS_LOGS_DIR:?RUSTFS_LOGS_DIR must be set in .env}
+        target: /logs
+    ports:
+      - "${RUSTFS_BIND_IP:-127.0.0.1}:${RUSTFS_API_PORT:-9000}:9000"
+      - "${RUSTFS_BIND_IP:-127.0.0.1}:${RUSTFS_CONSOLE_PORT:-9001}:9001"
+    networks:
+      - rustfs-network
+
+networks:
+  rustfs-network:
+    name: rustfs-network

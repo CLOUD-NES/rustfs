@@ -1,0 +1,89 @@
+- name: Deploy RustFS on SURF Research Cloud
+  hosts: localhost
+  gather_facts: false
+  vars:
+    storage_dir: /data/{{ user_storage_name }}/rustfs
+    credentials_dir: "{{ storage_dir }}/credentials"
+  tasks:
+
+  - name: Create data and logs directories on persistent storage
+    file:
+      path: "{{ storage_dir }}/{{ item }}"
+      state: directory
+      owner: '10001'
+      group: '10001'
+      mode: '0750'
+    loop:
+    - data
+    - logs
+
+  - name: Write .env for docker compose
+    no_log: true
+    copy:
+      dest: "{{ playbook_dir }}/.env"
+      mode: '0600'
+      content: |
+        RUSTFS_IMAGE_TAG='{{ rustfs_image_tag | default('1.0.0') }}'
+        RUSTFS_ACCESS_KEY='{{ lookup('password', credentials_dir ~ '/access_key chars=ascii_lowercase,digits length=20') }}'
+        RUSTFS_SECRET_KEY='{{ lookup('password', credentials_dir ~ '/secret_key chars=ascii_letters,digits length=40') }}'
+        RUSTFS_DATA_DIR='{{ storage_dir }}/data'
+        RUSTFS_LOGS_DIR='{{ storage_dir }}/logs'
+        RUSTFS_BIND_IP='127.0.0.1'
+        RUSTFS_API_PORT='9000'
+        RUSTFS_CONSOLE_PORT='9001'
+
+  - name: Start RustFS
+    community.docker.docker_compose_v2:
+      project_src: "{{ playbook_dir }}"
+      services:
+      - rustfs
+      pull: missing
+      wait: true
+      wait_timeout: 120
+
+  - name: Configure nginx reverse proxy
+    block:
+
+    - name: Create nginx location blocks
+      copy:
+        dest: "/etc/nginx/app-location-conf.d/rustfs.conf"
+        mode: '0644'
+        content: |
+          # RustFS web console (only works under its native path)
+          location /rustfs/console/ {
+              proxy_pass http://127.0.0.1:9001;
+              proxy_http_version 1.1;
+              proxy_set_header Connection "";
+              proxy_set_header Host $http_host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $scheme;
+              proxy_set_header X-Forwarded-Host $host;
+              proxy_set_header X-Forwarded-Port $server_port;
+          }
+
+          # RustFS S3 API
+          location / {
+              proxy_pass http://127.0.0.1:9000;
+              proxy_http_version 1.1;
+              proxy_set_header Connection "";
+              proxy_set_header Host $http_host;
+              proxy_set_header X-Real-IP $remote_addr;
+              proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              proxy_set_header X-Forwarded-Proto $scheme;
+              proxy_set_header X-Forwarded-Host $host;
+              proxy_set_header X-Forwarded-Port $server_port;
+              client_max_body_size 0;
+              proxy_request_buffering off;
+              proxy_buffering off;
+              proxy_read_timeout 300s;
+              proxy_send_timeout 300s;
+          }
+      notify: Reload nginx
+
+  handlers:
+
+  - name: Reload nginx
+    systemd:
+      name: nginx
+      state: reloaded
